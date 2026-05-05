@@ -834,6 +834,30 @@ app.post('/api/models/verify', async (req, res) => {
   } catch (e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 
+app.post('/api/models/verify-all', async (req, res) => {
+  const key = req.body?.apiKey || getActiveKeys()[0]?.value;
+  if (!key) return res.status(400).json({ error: 'apiKey required (or add active key in server)' });
+  const models = allCatalogModels().filter(m => m.category !== 'pipeline');
+  const results = await Promise.all(models.map(async (m) => {
+    try {
+      const isImage = m.category === 'image';
+      const vr = await fetch(`${NVIDIA_BASE}${isImage ? '/images/generations' : '/chat/completions'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+        body: JSON.stringify(isImage
+          ? { model: m.id, prompt: 'test image', size: '1024x1024' }
+          : { model: m.id, stream: false, max_tokens: 8, messages: [{ role: 'user', content: 'say ok' }] })
+      });
+      const txt = await vr.text();
+      return { model: m.id, category: m.category, ok: vr.ok, status: vr.status, reason: vr.ok ? 'PASS' : txt.slice(0, 220) };
+    } catch (e) {
+      return { model: m.id, category: m.category, ok: false, status: 0, reason: e.message };
+    }
+  }));
+  const pass = results.filter(r => r.ok).length;
+  res.json({ total: results.length, pass, fail: results.length - pass, results });
+});
+
 // ─── Main Proxy ───────────────────────────────────────────────────────────────
 async function proxyToNvidia(req, res, endpoint) {
   const startTime = Date.now();
@@ -879,7 +903,15 @@ async function proxyToNvidia(req, res, endpoint) {
       const b64 = data?.data?.[0]?.b64_json;
       const url = data?.data?.[0]?.url;
       const markdownImg = b64 ? `![generated](data:image/png;base64,${b64})` : (url ? `![generated](${url})` : '(no image output)');
-      return res.json({ id: `img-${Date.now()}`, object:'chat.completion', choices:[{ index:0, message:{ role:'assistant', content: markdownImg }, finish_reason:'stop' }] });
+      const payload = { id: `img-${Date.now()}`, object:'chat.completion', choices:[{ index:0, message:{ role:'assistant', content: markdownImg }, finish_reason:'stop' }] };
+      if (req.body?.stream === true) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+        const chunk = JSON.stringify({ choices: [{ delta: { content: markdownImg } }] });
+        res.write(`data: ${chunk}\n\n`);
+        res.write('data: [DONE]\n\n');
+        return res.end();
+      }
+      return res.json(payload);
     } catch (e) { return res.status(500).json({ error: { message: e.message, type: 'proxy_error', code: 'image_proxy_error' } }); }
   }
 

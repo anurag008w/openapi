@@ -628,6 +628,19 @@ async function verifyModelPrompt() {
   } catch (e) { toast(e.message, 'error'); }
 }
 
+async function verifyAllModels() {
+  try {
+    const res = await api('/api/models/verify-all', 'POST', {});
+    const failed = res.results.filter(r => !r.ok);
+    const passed = res.results.filter(r => r.ok).map(r => `✅ ${r.model}`).join('\n');
+    const failedText = failed.map(r => `❌ ${r.model} [${r.status}] ${String(r.reason || '').slice(0, 140)}`).join('\n');
+    const msg = `Total: ${res.total}\nPass: ${res.pass}\nFail: ${res.fail}\n\n${passed}\n\n${failedText || 'No failures'}`;
+    const w = window.open('', '_blank');
+    if (w) w.document.write(`<pre style="white-space:pre-wrap;font-family:monospace">${esc(msg)}</pre>`);
+    toast(`Verify complete: ${res.pass} pass / ${res.fail} fail`, res.fail ? 'error' : 'success');
+  } catch (e) { toast(e.message, 'error'); }
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────
 async function api(path, method='GET', body=null) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
