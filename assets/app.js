@@ -353,6 +353,19 @@ async function sendChat() {
         appendMsg('system-msg', '❌ Error: ' + (err.error?.message || JSON.stringify(err)));
         return;
       }
+      const ctype = (res.headers.get('content-type') || '').toLowerCase();
+      if (ctype.includes('application/json')) {
+        const data = await res.json().catch(() => ({}));
+        thinkEl.remove();
+        const reply = data.choices?.[0]?.message?.content || data.error?.message || '(empty response)';
+        appendMsg(data.error ? 'system-msg' : 'assistant', data.error ? `❌ ${reply}` : reply);
+        if (!data.error && reply.trim()) {
+          chatHistory.push({ role: 'assistant', content: reply });
+          saveChatHistory();
+        }
+        hidePipelineProgress();
+        return;
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -646,7 +659,9 @@ async function api(path, method='GET', body=null) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(path, opts);
-  const data = await res.json();
+  const text = await res.text();
+  let data = {};
+  try { data = text ? JSON.parse(text) : {}; } catch { throw new Error(text.slice(0, 200) || 'Non-JSON response'); }
   if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
 }
