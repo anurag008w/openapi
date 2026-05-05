@@ -14,6 +14,7 @@ const PORT = parseInt(process.env.PORT || '3000');
 const NVIDIA_BASE = 'https://integrate.api.nvidia.com/v1';
 const ENV_FILE = path.join(__dirname, '.env');
 const PIPELINES_FILE = path.join(__dirname, 'pipelines.json');
+const LOGS_FILE = path.join(__dirname, 'logs.local.json');
 const MAX_LOGS = 1000;
 const PIPELINE_MAX_CONCURRENCY = parseInt(process.env.PIPELINE_MAX_CONCURRENCY || '3');
 const PIPELINE_PLANNER_TIMEOUT_MS = parseInt(process.env.PIPELINE_PLANNER_TIMEOUT_MS || '90000');
@@ -504,10 +505,15 @@ function addLog(entry) {
     id: ++logIdCounter,
     timestamp: new Date().toISOString(),
     requestNumber: ++requestCounter,
+    method: entry.method || 'META',
+    endpoint: entry.endpoint || entry.event || 'unknown',
+    model: entry.model || 'unknown',
+    statusCode: entry.statusCode ?? 'NA',
     ...entry
   };
   logs.push(log);
   if (logs.length > MAX_LOGS) logs.shift();
+  saveLogs();
 
   // Console output
   const status = entry.statusCode || '???';
@@ -518,6 +524,22 @@ function addLog(entry) {
   if (entry.errorDetail) console.error(`  ↳ Error: ${entry.errorDetail}`);
 
   return log;
+}
+
+
+function loadLogs() {
+  try {
+    if (fs.existsSync(LOGS_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(LOGS_FILE, 'utf8'));
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) { console.error('[logs] Load failed:', e.message); }
+  return [];
+}
+
+function saveLogs() {
+  try { fs.writeFileSync(LOGS_FILE, JSON.stringify(logs, null, 2), 'utf8'); return true; }
+  catch (e) { console.error('[logs] Save failed:', e.message); return false; }
 }
 
 // ─── NVIDIA Free Tier Models ──────────────────────────────────────────────────
@@ -700,6 +722,7 @@ app.get('/api/logs', (req, res) => {
 app.delete('/api/logs', (req, res) => {
   const count = logs.length;
   logs = [];
+  saveLogs();
   res.json({ ok: true, cleared: count });
 });
 
@@ -1205,6 +1228,9 @@ app.all('/v1/*splat', (req, res) => {
 // ─── Init & Start ─────────────────────────────────────────────────────────────
 keys = loadKeysFromEnv();
 pipelines = loadPipelines();
+logs = loadLogs();
+logIdCounter = logs.reduce((m, l) => Math.max(m, l.id || 0), 0);
+requestCounter = logs.reduce((m, l) => Math.max(m, l.requestNumber || 0), 0);
 
 // ─── Startup Connectivity Check ───────────────────────────────────────────────
 async function checkNvidiaConnectivity() {
