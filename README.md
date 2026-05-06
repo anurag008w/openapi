@@ -216,3 +216,29 @@ curl http://localhost:3000/v1/chat/completions \
 ## License
 
 Free for personal/educational use. Follow NVIDIA NIM API terms of service.
+
+## Deployment (full app)
+
+Because GitHub Pages can only host static files, this repo now uses **two GitHub Actions workflows** so the complete app is deployed:
+
+1. **Frontend (GitHub Pages):** `.github/workflows/deploy-pages.yml`
+2. **Backend (Node proxy):** `.github/workflows/deploy-backend.yml` (Render deploy hook)
+
+### 1) Frontend deploy (GitHub Pages)
+- Automatically publishes `index.html` + `assets/`.
+- Uses relative asset paths so project Pages URL works.
+
+### 2) Backend deploy (Render)
+- On push to `main/master`, workflow triggers Render via `RENDER_DEPLOY_HOOK_URL` secret.
+- If the secret is missing, workflow logs a clear skip message.
+
+### 3) Connect frontend to backend
+Set this in `index.html` before loading `assets/app.js`:
+
+```html
+<script>
+  window.NIM_PROXY_API_BASE = "https://your-backend-service.onrender.com";
+</script>
+```
+
+If `window.NIM_PROXY_API_BASE` is not set, UI uses same-origin paths (`/api/*`, `/v1/*`) for local development.
